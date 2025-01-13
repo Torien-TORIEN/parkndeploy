@@ -1,0 +1,167 @@
+name: CI Release + CD Pipeline
+
+#on:
+#  workflow_run:
+#    workflows: ["CI Release Pipeline"]
+#    types:
+#      - completed
+
+on:
+  push:
+    tags:
+      - 'v[0-9].[0-9].[0-9]'  # Trigger when a version tag is pushed, e.g., v1.0.0
+
+      
+env: 
+  AZURE_RG_NAME: ${{ vars.PROJECT_NAME }}-rg-${{ vars.AZURE_RESOURCE_IDENTIFIER }}
+
+jobs:
+  # CI Release Pipeline
+  build_frontend:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_artifact: ${{ steps.upload_frontend.outputs.artifact_path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./frontend
+
+      - name: Run linting
+        run: npm run lint
+        working-directory: ./frontend
+
+      - name: Build the frontend app
+        run: npm run build
+        working-directory: ./frontend
+
+      - name: Upload frontend artifact
+        id: upload_frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-artifact
+          path: ./frontend/dist
+
+  build_backend:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_artifact: ${{ steps.upload_backend.outputs.artifact_path }}
+    steps: # Ce sont juste des lignes de commandes dans la machine virtuelle en utilisant run pour ligne de commande et uses pour les actions (commande déjà developpée)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Publish the app
+        run: dotnet publish -c Release --property:PublishDir=publish # Publish the app to the publish folder of the API project
+        working-directory: ./backend # specify where to find the sln file
+  
+      - name: Archive the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-artifact
+          path: ./backend/ParkNDeploy.Api/publish
+          retention-days: 5 # default is 90 days, quite a bit long
+        
+  #CD Pipeline
+  deploy_infrastructure:
+    runs-on: ubuntu-latest
+    needs: [build_frontend, build_backend] # Attendre CI
+    environment: production # bind the job to the production environment
+
+    permissions:
+      id-token: write # Require write permission to Fetch an OIDC token (required for federated credential) and write it, it will be automatically used on actions / cli that need it
+
+    outputs:
+      appServiceName: ${{ steps.bicep_deploy.outputs.appServiceName }}
+      staticWebAppName: ${{ steps.bicep_deploy.outputs.staticWebAppName }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Login to Azure 
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        enable-AzPSSession: true 
+
+    - name: Create resource group if not exists      
+      run: |
+        az group show --name ${{ env.AZURE_RG_NAME }} ||
+        az group create --name ${{ env.AZURE_RG_NAME }} --location ${{ secrets.AZURE_REGION }}
+
+    - name: Deploy bicep
+      id: bicep_deploy
+      uses: azure/arm-deploy@v2
+      with:
+        subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION }}
+        region: ${{ secrets.AZURE_REGION }}
+        template: ./infrastructure/main.bicep
+        parameters: project=${{ vars.PROJECT_NAME }} location=${{ secrets.AZURE_REGION }} swaLocation=${{ secrets.AZURE_SWA_REGION }} identifier=${{ vars.AZURE_RESOURCE_IDENTIFIER }}
+        resourceGroupName: ${{ env.AZURE_RG_NAME }}
+
+
+  deploy_backend:
+    runs-on: ubuntu-latest
+    needs: deploy_infrastructure
+    environment: production
+
+    permissions:
+      id-token: write # Require write permission to Fetch an OIDC token (required for federated credential) and write it, it will be automatically used on actions / cli that need it
+
+    steps:
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-artifact
+
+      - name: Login to Azure 
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Deploy backend to App Service
+        uses: azure/webapps-deploy@v2
+        with: 
+          app-name: ${{ needs.deploy_infrastructure.outputs.appServiceName }}
+          package: . # artifact is in the root folder
+
+  deploy_frontend:
+    runs-on: ubuntu-latest
+    needs: deploy_infrastructure
+    environment: production
+
+    permissions:
+      id-token: write # Require write permission to Fetch an OIDC token (required for federated credential) and write it, it will be automatically used on actions / cli that need it
+      
+    steps:
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-artifact
+
+      - name: Login to Azure 
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Static Web App deployment token
+        run: |      
+          SWA_DEPLOYMENT_TOKEN=$(az staticwebapp secrets list -n ${{ needs.deploy_infrastructure.outputs.staticWebAppName }} -o tsv --query properties.apiKey)
+          echo SWA_DEPLOYMENT_TOKEN=$SWA_DEPLOYMENT_TOKEN >> $GITHUB_ENV
+
+      - name: Deploy frontend to Static Web App
+        uses: azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ env.SWA_DEPLOYMENT_TOKEN }}
+          app_location: . # artifact is in the root folder
+          action: upload
+          skip_app_build: true
+          skip_api_build: true
