@@ -13,6 +13,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+        # Pas besoin de preciser la version(Set Up) de NodeJs car il y a déjà dans GitHub
+
       - name: Install dependencies
         run: npm install
         working-directory: ./frontend
@@ -31,7 +33,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      - name: Publish the backend app
+        # Pas besoin de preciser la version(Set Up) de dotnet car il y a déjà dans GitHub
+      - name: Publish the backend app # Restore => Build => Publish
         run: dotnet publish --configuration Release --output ./backend/publish
         working-directory: ./backend

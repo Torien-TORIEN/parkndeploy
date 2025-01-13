@@ -1,0 +1,67 @@
+name: CI Release Pipeline
+#
+# The Frontend job will build the React app and create a deployable artifact (e.g., a zip or tar file).
+# The Backend job will publish the .NET app and create a deployable artifact.
+# The artifacts for both frontend and backend will be stored in the GitHub Actions workflow and uploaded to be consumed by the CD pipeline.
+
+on:
+  push:
+    tags:
+      - 'v[0-9].[0-9].[0-9]'  # Trigger when a version tag is pushed, e.g., v1.0.0
+
+jobs:
+  build_frontend:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_artifact: ${{ steps.upload_frontend.outputs.artifact_path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./frontend
+
+      - name: Run linting
+        run: npm run lint
+        working-directory: ./frontend
+
+      - name: Build the frontend app
+        run: npm run build
+        working-directory: ./frontend
+
+      - name: Create frontend artifact
+        run: |
+          tar -czf frontend.tar.gz ./frontend/dist
+        working-directory: ./frontend
+
+      - name: Upload frontend artifact
+        id: upload_frontend
+        uses: actions/upload-artifact@v3
+        with:
+          name: frontend-artifact
+          path: ./frontend/frontend.tar.gz
+
+  build_backend:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_artifact: ${{ steps.upload_backend.outputs.artifact_path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Publish the backend app
+        run: dotnet publish --configuration Release --output ./backend/publish
+        working-directory: ./backend
+
+      - name: Create backend artifact
+        run: |
+          tar -czf backend.tar.gz ./backend/publish
+        working-directory: ./backend
+
+      - name: Upload backend artifact
+        id: upload_backend
+        uses: actions/upload-artifact@v3
+        with:
+          name: backend-artifact
+          path: ./backend/backend.tar.gz

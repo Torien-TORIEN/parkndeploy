@@ -1,8 +1,8 @@
 #on: [push, workflow_dispatch] #Declencher en faisant de push et Manuellement
 on:
-  push:
-    tags:
-      - 'v[0-9].[0-9].[0-9]'  # Ensure the tag follows the versioning pattern, e.g., v1.0.0 (site regex101.com)
+  # push:
+  #   tags:
+  #     - 'v[0-9].[0-9].[0-9]'  # Ensure the tag follows the versioning pattern, e.g., v1.0.0 (site regex101.com)
   workflow_dispatch:  # Allow manual triggers
   
 permissions:
