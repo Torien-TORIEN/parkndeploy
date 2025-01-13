@@ -30,38 +30,28 @@ jobs:
         run: npm run build
         working-directory: ./frontend
 
-      - name: Create frontend artifact
-        run: |
-          tar -czf frontend.tar.gz ./frontend/dist
-        working-directory: ./frontend
-
       - name: Upload frontend artifact
         id: upload_frontend
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: frontend-artifact
-          path: ./frontend/frontend.tar.gz
+          path: ./frontend/dist
 
   build_backend:
     runs-on: ubuntu-latest
     outputs:
       backend_artifact: ${{ steps.upload_backend.outputs.artifact_path }}
-    steps:
+    steps: # Ce sont juste des lignes de commandes dans la machine virtuelle en utilisant run pour ligne de commande et uses pour les actions (commande déjà developpée)
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Publish the backend app
-        run: dotnet publish --configuration Release --output ./backend/publish
-        working-directory: ./backend
-
-      - name: Create backend artifact
-        run: |
-          tar -czf backend.tar.gz ./backend/publish
-        working-directory: ./backend
-
-      - name: Upload backend artifact
-        id: upload_backend
-        uses: actions/upload-artifact@v3
+      - name: Publish the app
+        run: dotnet publish -c Release --property:PublishDir=publish # Publish the app to the publish folder of the API project
+        working-directory: ./backend # specify where to find the sln file
+  
+      - name: Archive the artifact
+        uses: actions/upload-artifact@v4
         with:
           name: backend-artifact
-          path: ./backend/backend.tar.gz
+          path: ./backend/ParkNDeploy.Api/publish
+          retention-days: 5 # default is 90 days, quite a bit long
