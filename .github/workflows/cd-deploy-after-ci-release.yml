@@ -1,19 +1,71 @@
-name: CD Pipeline
+name: CI Release + CD Pipeline
+
+#on:
+#  workflow_run:
+#    workflows: ["CI Release Pipeline"]
+#    types:
+#      - completed
 
 on:
-  workflow_run:
-    workflows: ["CI Release Pipeline"]
-    types:
-      - completed
+  push:
+    tags:
+      - 'v[0-9].[0-9].[0-9]'  # Trigger when a version tag is pushed, e.g., v1.0.0
     
-permissions:
-    id-token: write # Require write permission to Fetch an OIDC token (required for federated credential) and write it, it will be automatically used on actions / cli that need it
-
-
 jobs:
+  # CI Release Pipeline
+  build_frontend:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_artifact: ${{ steps.upload_frontend.outputs.artifact_path }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: ./frontend
+
+      - name: Run linting
+        run: npm run lint
+        working-directory: ./frontend
+
+      - name: Build the frontend app
+        run: npm run build
+        working-directory: ./frontend
+
+      - name: Upload frontend artifact
+        id: upload_frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-artifact
+          path: ./frontend/dist
+
+  build_backend:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_artifact: ${{ steps.upload_backend.outputs.artifact_path }}
+    steps: # Ce sont juste des lignes de commandes dans la machine virtuelle en utilisant run pour ligne de commande et uses pour les actions (commande déjà developpée)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Publish the app
+        run: dotnet publish -c Release --property:PublishDir=publish # Publish the app to the publish folder of the API project
+        working-directory: ./backend # specify where to find the sln file
+  
+      - name: Archive the artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-artifact
+          path: ./backend/ParkNDeploy.Api/publish
+          retention-days: 5 # default is 90 days, quite a bit long
+        
+  #CD Pipeline
   deploy_infrastructure:
     runs-on: ubuntu-latest
     environment: production # bind the job to the production environment
+
+    permissions:
+      id-token: write # Require write permission to Fetch an OIDC token (required for federated credential)
 
     outputs:
       appServiceName: ${{ steps.bicep_deploy.outputs.appServiceName }}
@@ -55,7 +107,6 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: backend-artifact
-          path: ./backend
 
       - name: Login to Azure 
         uses: azure/login@v2
@@ -68,7 +119,7 @@ jobs:
         uses: azure/webapps-deploy@v2
         with: 
           app-name: ${{ needs.deploy_infrastructure.outputs.appServiceName }}
-          package: ./backend/publish
+          package: . # artifact is in the root folder
 
   deploy_frontend:
     runs-on: ubuntu-latest
@@ -79,7 +130,6 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: frontend-artifact
-          path: ./frontend
 
       - name: Login to Azure 
         uses: azure/login@v2
@@ -97,7 +147,7 @@ jobs:
         uses: azure/static-web-apps-deploy@v1
         with:
           azure_static_web_apps_api_token: ${{ env.SWA_DEPLOYMENT_TOKEN }}
-          app_location: frontend/dist
+          app_location: . # artifact is in the root folder
           action: upload
           skip_app_build: true
           skip_api_build: true
