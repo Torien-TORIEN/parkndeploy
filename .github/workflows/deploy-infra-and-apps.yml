@@ -1,4 +1,10 @@
-on: [push, workflow_dispatch]
+#on: [push, workflow_dispatch] #Declencher en faisant de push et Manuellement
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Ensure the tag follows the versioning pattern, e.g., v1.0.0
+  workflow_dispatch:  # Allow manual triggers
+  
 permissions:
     id-token: write # Require write permission to Fetch an OIDC token (required for federated credential) and write it, it will be automatically used on actions / cli that need it
 
